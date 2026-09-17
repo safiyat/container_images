@@ -1,0 +1,26 @@
+FROM ubuntu:noble
+
+LABEL org.opencontainers.image.title="aria2c"
+LABEL org.opencontainers.image.description="aria2 download utility with JSON-RPC/XML-RPC enabled"
+LABEL org.opencontainers.image.base.name="docker.io/library/ubuntu:noble"
+LABEL org.opencontainers.image.licenses="GPL-2.0-or-later"
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        aria2 \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 1001 aria2 \
+    && useradd --uid 1001 --gid aria2 --shell /usr/sbin/nologin --create-home aria2
+
+COPY --chmod=755 entrypoint.sh /usr/local/bin/aria2c-entrypoint
+
+USER aria2
+
+VOLUME /home/aria2/.aria2
+
+WORKDIR /downloads
+
+EXPOSE 6800
+
+ENTRYPOINT ["/usr/local/bin/aria2c-entrypoint"]
