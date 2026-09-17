@@ -3,6 +3,8 @@ set -eu
 
 CONF_DIR=/home/aria2/.aria2
 CONF_PATH="$CONF_DIR/aria2.conf"
+WEBUI_DIR=/opt/webui-aria2
+WEBUI_PORT=8080
 
 downloads_src="$(awk '$2 == "/downloads" { print $1; exit }' /proc/self/mounts 2>/dev/null || true)"
 
@@ -30,6 +32,13 @@ mkdir -p "$CONF_DIR"
     echo "dir=/downloads"
     echo "save-session=$CONF_DIR/aria2.session"
     echo "save-session-interval=60"
+    echo "file-allocation=prealloc"
+    echo "log-level=warn"
+    echo "max-concurrent-downloads=16"
+    echo "max-overall-download-limit=0"
+    echo "max-connection-per-server=16"
+    echo "min-split-size=5M"
+    echo "split=16"
 } > "$CONF_PATH"
 
 is_int() {
@@ -52,6 +61,7 @@ set_option() {
 
 uris=
 err=
+rpc_secret_set=0
 
 for arg in "$@"; do
     value="${arg#*=}"
@@ -127,6 +137,7 @@ for arg in "$@"; do
                 break
             fi
             set_option rpc-secret "$value"
+            rpc_secret_set=1
             ;;
         --*)
             err="unsupported option: $arg"
@@ -152,5 +163,34 @@ if [ -n "$err" ]; then
     exit 1
 fi
 
+if [ "$rpc_secret_set" -eq 0 ]; then
+    echo "ERROR: --rpc-secret=<token> is required for the RPC interface." >&2
+    echo "Example:" >&2
+    echo "  podman run ... localhost/aria2c:latest --rpc-secret=changeme" >&2
+    exit 1
+fi
+
+aria2_pid=
+webui_pid=
+
+# shellcheck disable=SC2329
+cleanup() {
+    [ -n "$webui_pid" ] && kill "$webui_pid" 2>/dev/null || true
+    [ -n "$aria2_pid" ] && kill "$aria2_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
+cd "$WEBUI_DIR"
+/usr/bin/node node-server.js "$WEBUI_PORT" &
+webui_pid=$!
+
+cd /downloads
 # shellcheck disable=SC2086
-exec /usr/bin/aria2c --conf-path="$CONF_PATH" $uris
+/usr/bin/aria2c --conf-path="$CONF_PATH" $uris &
+aria2_pid=$!
+
+wait "$aria2_pid"
+status=$?
+exit $status
